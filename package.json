@@ -1,0 +1,36 @@
+{
+  "name": "newadusers-gui",
+  "version": "1.0.0",
+  "description": "GUI для создания доменных учетных записей и синхронизации с M365",
+  "author": {
+    "name": "Erik Stopnitskiy",
+    "email": "e.stopnitskiy@centrum-air.com"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.centrumair.usercreator",
+    "productName": "CentrumAirUserMailCreator",
+    "files": [
+      "**/*",
+      "!node_modules/.cache/**"
+    ],
+    "asar": true,
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico"
+    }
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.0",
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "^26.0.12",
+    "electron-reload": "latest"
+  }
+}

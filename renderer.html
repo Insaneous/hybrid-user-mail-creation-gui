@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>User + Mail Creation GUI</title>
+<style>
+  html{color-scheme: dark}
+  body{font-family: sans-serif; padding: 0 1.5rem 1.5rem; margin: 0; background-color: #222222; color: #fff;}
+  #log{background:#000;border: 0.2rem solid rgb(10, 88, 202);color:#0f0;font-family:Consolas;height:250px;overflow:auto;padding:5px;}
+  table{width: 100%; border-collapse: collapse; margin-top: 10px; font-family: "Segoe UI", sans-serif; font-size: 14px}
+  th, td{border: 1px solid #ccc; padding: 8px 10px; text-align: left}
+  button{border: none; background-color: rgb(220, 57, 177); color: #fff; padding: 0.7rem; cursor: pointer; font-size: 1rem; border-radius: 0.5rem}
+  button:hover{background-color: #1648B8}
+  input{display: block; border: 1px solid #dde5f6; border-radius: 10px; background: #fff; padding: 0.5rem; width: 50%; color: #000}
+  #params{display: flex; flex-direction: column; gap: 0.5rem; background-color: #1648B8; border: 1px solid rgb(10, 88, 202); padding: 1rem; border-radius: 1rem; margin-bottom: 0.5rem;}
+</style>
+</head>
+<body>
+  <h2>CENTRUM-AIR User + Mail Creation GUI</h2>
+  <div id="buttons" style="display: flex; gap: 0.5rem; align-items: center;">
+    <button id="btnAddUser">Добавить пользователя в список</button>
+    <button id="btnCSV">Выбрать CSV</button>
+    <button id="btnClearCSV">Убрать CSV</button>
+    <span id="csvPath"></span>
+  </div>
+
+  <div id="preview"></div>
+
+  <h3>Параметры</h3>
+  <div id="params">
+    <label>AD Host <input id="adHost" value="TASVDC04.centrum-air.com" /></label>
+    <label>Exchange Host <input id="exchHost" value="EXCH0402TAS.centrum-air.com" /></label>
+    <label>SU-логин <input id="adminUser" value="CENTRUM-AIR\" /></label>
+    <label>Пароль <input id="adminPass" type="password" /></label>
+  </div>
+
+  <button id="btnRun">Создать пользователей + почту + синхронизировать</button>
+
+  <h3>Прогресс</h3>
+  
+  <div id="progressContainer" style="width:100%; background:#eee; height:20px; border-radius:6px;">
+      <div id="progressBar" style="width:0%; height:100%; background: #1648B8; border-radius:5px;"></div>
+  </div>
+  <p id="progressText">Ожидание запуска...</p>
+
+
+  <h3>Логи</h3>
+  
+  <div id="log"></div>
+
+  <h6>© Erik Stopnitskiy</h6>
+  <script src="renderer.js"></script>
+</body>
+</html>
