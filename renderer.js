@@ -14,6 +14,19 @@ const progressText = document.getElementById('progressText');
 
 let csvPath = null;
 
+const args = window.startup.args;
+
+let login = "";
+let password = "";
+
+args.forEach(arg => {
+  if (arg.startsWith("--login=")) login = arg.replace("--login=", "");
+  if (arg.startsWith("--password=")) password = arg.replace("--password=", "");
+});
+
+adminUserInput.value = login;
+adminPassInput.value = password;
+
 // === Кнопка выбора CSV ===
 btnCSV.addEventListener('click', async () => {
   const path = await window.api.openCSV();
@@ -50,7 +63,9 @@ window.api.onCSVUpdated(async newPath => {
 });
 
 // === Кнопка запуска процесса ===
-btnRun.addEventListener('click', () => {
+const form = document.getElementById('paramsForm');
+form.onsubmit = e => {
+  e.preventDefault();
   if (!csvPath) {
     alert("Сначала выберите CSV файл или добавьте пользователей вручную.");
     return;
@@ -75,47 +90,80 @@ btnRun.addEventListener('click', () => {
     adminUser,
     adminPass
   });
-});
+};
+// === Цветное оформление логов ===
+function formatLog(text) {
+  if (!text) return "";
 
-// === Получение логов из процесса ===
+  let color = "";
+  let cleanText = text;
+
+  if (text.includes("[ERROR]")) {
+    color = "red";
+  } else if (text.includes("[WARN]")) {
+    color = "#ff4800";
+  } else if (text.includes("[OK]")) {
+    color = "lightgreen";
+  } else if (text.includes("[STEP]")) {
+    color = "#4ea3ff";
+    cleanText = `<b>${text}</b>`;
+  } else if (text.includes("[PROGRESS]")) {
+    color = "#5ec5ff";
+  }
+
+  return `<div style="color:${color}; white-space:pre-wrap;">${cleanText}</div>`;
+}
+
+// === Хранилище строк для фильтрации дублей ===
+const seenLogs = new Set();
+
+// === Получение логов ===
 window.api.onLog(data => {
-  logDiv.innerHTML += `<div>${data.text}</div>`;
+  if (!data.text) return;
+
+  const trimmed = data.text.trim();
+  if (seenLogs.has(trimmed)) return;
+  seenLogs.add(trimmed);
+
+  logDiv.innerHTML += formatLog(trimmed);
   logDiv.scrollTop = logDiv.scrollHeight;
 });
 
-// === Получение статусов ===
+// === Статусы ===
 window.api.onStatus?.((status) => {
-  logDiv.innerHTML += `<div><b>${status.text}</b></div>`;
+  if (!status.text) return;
+
+  const formatted = formatLog(status.text);
+  logDiv.innerHTML += formatted;
   logDiv.scrollTop = logDiv.scrollHeight;
 
-  // === Прогресс ===
+  // === Прогресс бар ===
   const steps = [
     'Copy CSV',
-    'Run ADNewUsers.ps1',
-    'Fetch final NewADUsers_Credentials.csv',
-    'Connect to Exchange',
-    'Start Azure AD Connect sync'
+    'AD user creation',
+    'Fetch final',
+    'Enable Remote Mailboxes',
+    'Start Azure AD Sync'
   ];
 
-  if (status.step === 'progress' || status.step === 'success') {
-    const matchedStep = steps.findIndex(s => status.text.includes(s)) + 1;
-    if (matchedStep > 0) {
-      const percent = Math.min((matchedStep / steps.length) * 100, 100);
+  if (status.step === "progress" || status.step === "success") {
+    const idx = steps.findIndex(s => status.text.includes(s)) + 1;
+    if (idx > 0) {
+      const percent = Math.round(idx / steps.length * 100);
       progressBar.style.width = percent + '%';
-      progressText.textContent = `Шаг ${matchedStep} из ${steps.length}: ${status.text}`;
+      progressText.innerHTML = `🔄 Шаг ${idx} / ${steps.length}: ${status.text}`;
     }
   }
 
-  if (status.step === 'warn') {
-    progressText.textContent = `⚠️ ${status.text}`;
+  if (status.step === "warn") {
+    progressText.innerHTML = `⚠️ ${status.text}`;
   }
 
-  if (status.step === 'done') {
-    progressBar.style.width = '100%';
-    progressText.textContent = '✅ Процесс завершён!';
+  if (status.step === "done") {
+    progressBar.style.width = "100%";
+    progressText.innerHTML = "✅ Процесс завершён!";
   }
 });
-
 
 // === Когда процесс завершён ===
 window.api.onDone(res => {
@@ -159,8 +207,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const params = await window.api.loadParams();
   document.getElementById('adHost').value = params.adHost;
   document.getElementById('exchHost').value = params.exchHost;
-  document.getElementById('adminUser').value = params.adminUser;
-  document.getElementById('adminPass').value = params.adminPass;
 
   // === Автосохранение при изменении ===
   document.querySelectorAll('#params input').forEach(inp => {

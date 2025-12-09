@@ -91,18 +91,17 @@
       else statusDiv.textContent = "Создаётся новый CSV...";
     });
 
-    form.addEventListener('submit', e => {
+    form.onsubmit = e => {
       e.preventDefault();
       const formData = new FormData(form);
       const user = Object.fromEntries(formData.entries());
       window.api.saveUser({ csvPath: currentCSV, user });
-    });
+    };
 
     window.api.onUserSaved(res => {
       if (res.ok) {
         statusDiv.textContent = "✅ Пользователь добавлен";
         if (res.newPath) currentCSV = res.newPath;
-        setTimeout(() => window.close(), 700);
       } else {
         statusDiv.textContent = "❌ Ошибка: " + res.error;
       }

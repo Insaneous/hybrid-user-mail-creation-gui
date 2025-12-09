@@ -4,23 +4,37 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const Store = require('electron-store');
 const store = new Store();
+let authWindow;
+let mainWindow;
 
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1350,
-    height: 800,
+function createAuthWindow() {
+  authWindow = new BrowserWindow({
+    width: 400,
+    height: 410,
+    resizable: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
+      preload: __dirname + "/preload.js"
     }
   });
-
-  win.loadFile('renderer.html');
+  authWindow.loadFile("auth.html");
 }
 
-app.whenReady().then(createWindow);
+function createMainWindow(credentials) {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 800,
+    webPreferences: {
+      preload: __dirname + "/preload.js",
+      additionalArguments: [
+        `--login=${credentials.login}`,
+        `--password=${credentials.password}`
+      ]
+    }
+  });
+  mainWindow.loadFile("renderer.html");
+}
+
+app.whenReady().then(createAuthWindow);
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
@@ -56,6 +70,61 @@ function runPowerShell(cmd, onData, onErr, onClose) {
 }
 
 // --- IPC handlers ---
+ipcMain.on("auth-check", (event, { login, password }) => {
+  const ps = spawn("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `
+      $sec = ConvertTo-SecureString "${password}" -AsPlainText -Force
+      $cred = New-Object System.Management.Automation.PSCredential("${login}", $sec)
+
+      try {
+        # Получаем группы текущего пользователя на домене
+        $groupDns = Invoke-Command -ComputerName TASVDC04 -Credential $cred -ScriptBlock {
+          (Get-ADUser $env:USERNAME -Properties memberOf).memberOf
+        }
+
+        # Приводим к строке для простого поиска
+        $groups = $groupDns -join ";"
+
+        # Группы, которые должны присутствовать
+        $required1 = "air.tas.Mail.Recipents"
+        $required2 = "AIR.TAS.Local.Admins"
+
+        # Проверка вхождения обеих групп (по CN, без зависимости от DN)
+        $hasGroup1 = $groups -match $required1
+        $hasGroup2 = $groups -match $required2
+
+        if ($hasGroup1 -and $hasGroup2) {
+          Write-Output "OK"
+        } else {
+          Write-Output "NOADMIN"
+        }
+      } catch {
+        Write-Output "ERROR: $($_.Exception.Message)"
+      }
+    `
+  ]);
+
+  ps.stdout.on("data", data => {
+    const text = data.toString().trim();
+
+    if (text === "OK") {
+      event.sender.send("auth-result", { ok: true });
+
+      // запускаем основное окно
+      createMainWindow({ login, password });
+      return;
+    }
+
+    if (text === "NOADMIN") {
+      event.sender.send("auth-result", { ok: false, error: "Неправильные данные или нет прав." });
+      return;
+    }
+
+    event.sender.send("auth-result", { ok: false, error: text });
+  });
+});
 
 ipcMain.handle('dialog:openCSV', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -163,66 +232,78 @@ ipcMain.on('deploy:runFullProcess', (event, data) => {
   event.sender.send('deploy:status', { step: 'init', text: 'Starting process of creating users...' });
 
   const psScript = `
-$ErrorActionPreference = 'Continue'   ### CHANGED: don't stop on non-critical errors
+$ErrorActionPreference = 'Continue'
 $plain = "${adminPass}"
 $sec = ConvertTo-SecureString $plain -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential("${adminUser}", $sec)
 
-# === 1. Copy CSV and run ADNewUsers.ps1 ===
+# ================================
+# STEP 1 — Copy CSV
+# ================================
 Write-Host "[STEP]1: Copy CSV"
 $netPath = "\\\\${adHost}\\C$\\Temp"
 $localFileName = Split-Path -Leaf "${localCSV}"
 
 try {
     New-PSDrive -Name "Z" -PSProvider FileSystem -Root $netPath -Credential $cred -ErrorAction Stop
-    Copy-Item -Path "${localCSV}" -Destination "Z:\\$($localFileName)" -Force
-    Write-Host "[OK] CSV copied to ${adHost}:\\C$\\Temp\\$($localFileName)"
-    Remove-PSDrive -Name "Z" -ErrorAction SilentlyContinue
+    Copy-Item -Path "${localCSV}" -Destination "Z:\\$localFileName" -Force
+    Write-Host "[OK] CSV copied to ${adHost}:\\C$\\Temp\\$localFileName"
 }
 catch {
-    Write-Warning "[WARN] Failed to copy CSV: $($_.Exception.Message)"   ### CHANGED
+    Write-Error "[ERROR] Failed to copy CSV: $($_.Exception.Message)"
+}
+finally {
     Remove-PSDrive -Name "Z" -ErrorAction SilentlyContinue
 }
+
+# ================================
+# STEP 2 — Run ADNewUsers.ps1
+# ================================
+Write-Host "[STEP]2: AD user creation on ${adHost}"
 
 try {
-    Write-Host "[STEP]2: Run ADNewUsers.ps1 on ${adHost}"
     Invoke-Command -ComputerName "${adHost}" -Credential $cred -ScriptBlock {
-        & "C:\\Scripts\\ADNewUsers.ps1" -ErrorAction Continue    ### CHANGED
-    } -ErrorAction Continue
-    Write-Host "[OK] ADNewUsers.ps1 executed (some warnings possible)."
+        & "C:\\Scripts\\ADNewUsers.ps1"
+    } -ErrorAction Stop
+
+    Write-Host "[OK] AD user creation completed"
 }
 catch {
-    Write-Warning "[WARN] ADNewUsers.ps1 had errors: $($_.Exception.Message)"   ### CHANGED
+    Write-Error "[ERROR] ADNewUsers.ps1 failed: $($_.Exception.Message)"
 }
 
-# === Copy back final usernames CSV ===
-Write-Host "[STEP]3: Fetch final NewADUsers_Credentials.csv from AD Host..."
-$remoteFinalCsv = "NewADUsers_Credentials.csv"
+# ================================
+# STEP 3 — Fetch final CSV
+# ================================
+Write-Host "[STEP]3: Fetch final NewADUsers_Credentials.csv"
 
-# Получаем путь к рабочему столу текущего пользователя
+$remoteFinalCsv = "NewADUsers_Credentials.csv"
 $desktopPath = [Environment]::GetFolderPath('Desktop')
 $localCSV_Final = Join-Path $desktopPath "NewADUsers_Final.csv"
 
 try {
-    $netPath = "\\\\${adHost}\\C$\\Temp"
     New-PSDrive -Name "Z" -PSProvider FileSystem -Root $netPath -Credential $cred -ErrorAction Stop
     
     if (Test-Path "Z:\\$remoteFinalCsv") {
         Copy-Item -Path "Z:\\$remoteFinalCsv" -Destination $localCSV_Final -Force
         Write-Host "[OK] Final CSV copied locally: $localCSV_Final"
     } else {
-        Write-Warning "[WARN] Final CSV not found on ADHost, using original CSV."
+        Write-Warning "[WARN] Final CSV not found. Using original CSV."
         $localCSV_Final = "${localCSV}"
     }
-    
-    Remove-PSDrive -Name "Z" -ErrorAction SilentlyContinue
-} catch {
-    Write-Warning "[WARN] Failed to copy back final CSV: $($_.Exception.Message)"
+}
+catch {
+    Write-Error "[ERROR] Failed to fetch final CSV: $($_.Exception.Message)"
+}
+finally {
     Remove-PSDrive -Name "Z" -ErrorAction SilentlyContinue
 }
 
-# === Enable Remote Mailboxes on Exchange ===
-Write-Host "[STEP]4: Connect to Exchange and enable remote mailboxes..."
+# ================================
+# STEP 4 — Enable Remote Mailboxes
+# ================================
+Write-Host "[STEP]4: Enable Remote Mailboxes"
+
 try {
     $session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "http://${exchHost}/PowerShell/" -Authentication Kerberos -Credential $cred
     Import-PSSession $session -DisableNameChecking | Out-Null
@@ -230,37 +311,48 @@ try {
     $users = Import-Csv -Path $localCSV_Final
     foreach ($u in $users) {
         $upn = $u.Username
-        if (-not $upn -or $upn.Trim() -eq "") {
-            Write-Warning "Skipping user without Username field."
+        if (-not $upn) {
+            Write-Warning "[WARN] Skipping user without Username"
             continue
         }
-        Write-Host "[PROGRESS] Enable remote mailbox for $upn..."
+
+        $remoteRouting = "$upn@centrumgroup365.mail.onmicrosoft.com"
+        Write-Host "[PROGRESS] Enabling mailbox: $upn"
+
         try {
-            $remoteRouting = "$upn@centrumgroup365.mail.onmicrosoft.com"
             Enable-RemoteMailbox -Identity $upn -RemoteRoutingAddress $remoteRouting -ErrorAction Stop
-            Write-Host "[OK] Remote mailbox enabled for $upn"
+            Write-Host "[OK] Mailbox enabled: $upn"
         } catch {
-            Write-Warning ("Failed mailbox for " + $upn + ": " + $_.Exception.Message)
-            continue   ### CHANGED: skip to next user on error
+            Write-Error ("[ERROR] Failed mailbox for {0}: {1}" -f $upn, $_.Exception.Message)
         }
     }
 
-    Remove-PSSession $session
-    Write-Host "[OK] Exchange mailbox provisioning complete."
-} catch {
-    Write-Warning "[WARN] Exchange mailbox step failed: $($_.Exception.Message)"   ### CHANGED
+    Write-Host "[OK] Exchange provisioning completed"
+}
+catch {
+    Write-Error "[ERROR] Exchange mailbox stage failed: $($_.Exception.Message)"
+}
+finally {
+    if ($session) { Remove-PSSession $session }
 }
 
-# === Trigger Azure AD Connect sync ===
-Write-Host "[STEP]5: Start Azure AD Connect sync..."
+# ================================
+# STEP 5 — Start Azure Sync
+# ================================
+Write-Host "[STEP]5: Start Azure AD Sync"
+
 try {
-    Invoke-Command -ComputerName "${adHost}" -Credential $cred -ScriptBlock { Start-ADSyncSyncCycle -PolicyType Delta } -ErrorAction Continue
-    Write-Host "[OK] Azure AD Connect sync started."
-} catch {
-    Write-Warning "[WARN] Failed to start Azure AD Connect sync: $($_.Exception.Message)"
+    Invoke-Command -ComputerName "${adHost}" -Credential $cred -ScriptBlock { 
+        Start-ADSyncSyncCycle -PolicyType Delta 
+    } -ErrorAction Stop
+
+    Write-Host "[OK] Azure AD Connect sync started"
+}
+catch {
+    Write-Error "[ERROR] Azure AD Sync failed: $($_.Exception.Message)"
 }
 
-Write-Host "[DONE] Process completed (some warnings may have occurred)."
+Write-Host "[DONE] Process finished"
 `;
 
   runPowerShell(
@@ -289,12 +381,12 @@ Write-Host "[DONE] Process completed (some warnings may have occurred)."
         event.sender.send('deploy:status', { step: 'warn', text: warnText });
 
       } else if (out.includes('[DONE]')) {
-        event.sender.send('deploy:status', { step: 'done', text: '✅ Completed (with warnings possible).' });
 
         // === 🎉 Show popup window with completion message ===
         const mainWindow = BrowserWindow.getAllWindows()[0];
         const csvMsg = global.finalCSVPath 
-          ? `✅ CSV с данными пользователей сохранён по пути:\n${global.finalCSVPath}`
+          ? `CSV со сгенерированными данными сохранён по пути:\n${global.finalCSVPath}` +
+            `\n\nВозможно были ошибки, пожалуйста, проверьте логи в программе.`
           : ``;
 
         dialog.showMessageBox(mainWindow, {
@@ -302,7 +394,7 @@ Write-Host "[DONE] Process completed (some warnings may have occurred)."
           buttons: ['OK'],
           defaultId: 0,
           title: 'Процесс завершён',
-          message: 'Все операции завершены!',
+          message: 'Все операции завершены',
           detail: csvMsg
         });
       }

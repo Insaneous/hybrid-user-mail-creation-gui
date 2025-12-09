@@ -19,6 +19,7 @@
       "!node_modules/.cache/**"
     ],
     "asar": true,
+    "compression": "maximum",
     "win": {
       "target": "portable",
       "icon": "icon.ico"

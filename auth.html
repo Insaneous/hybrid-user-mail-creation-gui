@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Авторизация</title>
+  <style>
+    html{color-scheme: dark}
+    body{font-family: sans-serif; padding: 0 1.5rem 1.5rem; margin: 0; background-color: #222222; color: #fff;}
+    input{border: 1px solid #dde5f6; border-radius: 10px; background: #fff; padding: 0.5rem; color: #000}
+    button{margin-top: 15px; width: 100%; padding: 8px;}
+    button{border: none; background-color: rgb(220, 57, 177); color: #fff; padding: 0.7rem; cursor: pointer; font-size: 1rem; border-radius: 0.5rem; margin: 0.5rem 0}
+    button:hover{background-color: #1648B8}
+    #divForm{display: flex; flex-direction: column; gap: 0.5rem; background-color: #1648B8; border: 1px solid rgb(10, 88, 202); padding: 1rem; border-radius: 1rem}
+  </style>
+</head>
+<body>
+  <h2>Авторизация</h2>
+  <form id="authForm">
+    <div id="divForm">
+      <label>Логин (DOMAIN\user)</label>
+      <input id="login" required/>
+      <label>Пароль</label>
+      <input id="password" type="password" required/>
+    </div>
+  
+    <button id="btnLogin" type="submit">Войти</button>
+  </form>
+
+  <div id="status" style="margin-top:10px;color:#ff6a6a"></div>
+
+<script>
+  const btn = document.getElementById('btnLogin');
+  const statusDiv = document.getElementById('status');
+
+  const form = document.getElementById('authForm');
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    const login = document.getElementById('login').value.trim();
+    const password = document.getElementById('password').value.trim();
+
+    if (!login || !password) {
+      statusDiv.textContent = "Введите логин и пароль";
+      return;
+    }
+
+    window.api.authCheck({ login, password });
+    statusDiv.textContent = "Выполняется авторизация...";
+  };
+
+  window.api.onAuthResult(res => {
+    if (!res.ok) {
+      statusDiv.textContent = "❌ " + res.error;
+      return;
+    }
+    // Успех: закрываем окно
+    window.close();
+  });
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    // === Загрузить сохранённые параметры ===
+    const params = await window.api.loadParams();
+    document.getElementById('login').value = params.adminUser;
+    document.getElementById('password').value = params.adminPass;
+
+    // === Автосохранение при изменении ===
+    document.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const updated = {
+          adminUser: document.getElementById('login').value,
+          adminPass: document.getElementById('password').value
+        };
+        window.api.saveParams(updated);
+      });
+    });
+  });
+</script>
+</body>
+</html>
