@@ -43,12 +43,13 @@ btnCSV.addEventListener('click', async () => {
 // === Кнопка очистки CSV ===
 btnClearCSV.addEventListener('click', () => {
   csvPath = null;
-  csvPathSpan.textContent = "Файл не выбран";
+  csvPathSpan.textContent = "Файл не выбран (Будет создан новый)";
   previewDiv.innerHTML = "";
 });
 
 // === Кнопка добавления пользователя ===
 btnAddUser.addEventListener('click', () => {
+  // Открываем окно, передавая текущий csvPath (null если новый)
   window.api.openAddUserWindow(csvPath);
 });
 
@@ -91,6 +92,7 @@ form.onsubmit = e => {
     adminPass
   });
 };
+
 // === Цветное оформление логов ===
 function formatLog(text) {
   if (!text) return "";
@@ -129,7 +131,7 @@ window.api.onLog(data => {
   logDiv.scrollTop = logDiv.scrollHeight;
 });
 
-// === Статусы ===
+// === Статусы (Progress Bar) ===
 window.api.onStatus?.((status) => {
   if (!status.text) return;
 
@@ -137,17 +139,21 @@ window.api.onStatus?.((status) => {
   logDiv.innerHTML += formatted;
   logDiv.scrollTop = logDiv.scrollHeight;
 
-  // === Прогресс бар ===
+  // === ИСПРАВЛЕННЫЙ Прогресс бар ===
+  // Эти строки должны совпадать с тем, что отправляет main.js в [STEP]
   const steps = [
-    'Copy CSV',
-    'AD user creation',
-    'Fetch final',
-    'Enable Remote Mailboxes',
-    'Start Azure AD Sync'
+    'Connecting to AD Controller',
+    'Uploading CSV',
+    'Running User Creation Script',
+    'Downloading Results',
+    'Connecting to Exchange',
+    'Triggering AD Sync'
   ];
 
   if (status.step === "progress" || status.step === "success") {
+    // Ищем частичное совпадение
     const idx = steps.findIndex(s => status.text.includes(s)) + 1;
+    
     if (idx > 0) {
       const percent = Math.round(idx / steps.length * 100);
       progressBar.style.width = percent + '%';
@@ -169,6 +175,8 @@ window.api.onStatus?.((status) => {
 window.api.onDone(res => {
   logDiv.innerHTML += `<div>✅ Процесс завершён. Код выхода: ${res.code}</div>`;
   logDiv.scrollTop = logDiv.scrollHeight;
+  progressBar.style.width = "100%";
+  progressText.innerHTML = "✅ Готово";
 });
 
 // === Отображение CSV ===
@@ -177,11 +185,13 @@ function renderCSV(content) {
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-  // Добавляем заголовок для кнопки удаления в начало
   let html = `<h3>Просмотр CSV</h3><table><tr>
     <th></th>` + headers.map(h => `<th>${h}</th>`).join('') + `</tr>`;
 
   dataRows.forEach((r, i) => {
+    // Не рендерим пустые строки
+    if(r.length <= 1 && !r[0]) return;
+    
     html += `<tr>
       <td><button class="delBtn" data-index="${i}">🗑️</button></td>` +
       r.map(c => `<td>${c}</td>`).join('') +
@@ -191,7 +201,6 @@ function renderCSV(content) {
   html += `</table>`;
   previewDiv.innerHTML = html;
 
-  // === кнопки удаления ===
   document.querySelectorAll(".delBtn").forEach(btn => {
     btn.addEventListener("click", async e => {
       const idx = e.target.getAttribute("data-index");
@@ -203,12 +212,10 @@ function renderCSV(content) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // === Загрузить сохранённые параметры ===
   const params = await window.api.loadParams();
-  document.getElementById('adHost').value = params.adHost;
-  document.getElementById('exchHost').value = params.exchHost;
+  if(params.adHost) document.getElementById('adHost').value = params.adHost;
+  if(params.exchHost) document.getElementById('exchHost').value = params.exchHost;
 
-  // === Автосохранение при изменении ===
   document.querySelectorAll('#params input').forEach(inp => {
     inp.addEventListener('input', () => {
       const updated = {
