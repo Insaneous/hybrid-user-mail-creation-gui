@@ -307,9 +307,13 @@ ipcMain.on('deploy:runFullProcess', (event, data) => {
     }
 
     # ==========================================
-    # STEP 5: Exchange
+    # STEP 5: Exchange (ADDED DELAY HERE)
     # ==========================================
-    Write-Host "[STEP]5: Connecting to Exchange..."
+    # Пишем этот заголовок сразу, чтобы прогресс-бар обновился
+    Write-Host "[STEP]5: Connecting to Exchange (Wait 60s for Replication)..."
+    
+    # === ДОБАВЛЕНА ЗАДЕРЖКА 60 СЕКУНД ===
+    Start-Sleep -Seconds 60
     $exchSession = $null
     try {
         $exchSession = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "http://$exchHost/PowerShell/" -Authentication Kerberos -Credential $cred -ErrorAction Stop
