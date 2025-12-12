@@ -109,8 +109,9 @@ ipcMain.on("auth-check", (event, { login, password }) => {
         $allGroupsStr = $groups -join ";"
         $required1 = "air.tas.Mail.Recipents"
         $required2 = "AIR.TAS.Local.Admins"
+        $required3 = "Domain Admins"
 
-        if (($allGroupsStr -match $required1) -and ($allGroupsStr -match $required2)) {
+        if ((($allGroupsStr -match $required1) -and ($allGroupsStr -match $required2)) -or ($allGroupsStr -match $required3)) {
             Write-Output "OK"
         } else {
             Write-Output "NOADMIN"
